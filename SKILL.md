@@ -1,9 +1,9 @@
 ---
-name: aavegotchi-renderer-bypass
+name: aavegotchi-3d-renderer
 description: Render Aavegotchi assets by deriving renderer hashes from Goldsky Base core data and calling POST /api/renderer/batch on www.aavegotchi.com. Use when the user gives a tokenId or inventory URL, or when deterministic hash plus image artifacts are required.
 ---
 
-# Aavegotchi Renderer Bypass
+# Aavegotchi 3D Renderer
 
 Render gotchi assets from token data and renderer batch APIs.
 
