@@ -1,11 +1,11 @@
 ---
 name: aavegotchi-renderer-bypass
-description: Render Aavegotchi assets without POST /api/renderer/parse/ids by deriving renderer hashes from Goldsky Base core data and calling POST /api/renderer/batch on www.aavegotchi.com. Use when parse/ids fails, when the user gives a tokenId or inventory URL, or when deterministic hash plus image artifacts are required.
+description: Render Aavegotchi assets by deriving renderer hashes from Goldsky Base core data and calling POST /api/renderer/batch on www.aavegotchi.com. Use when the user gives a tokenId or inventory URL, or when deterministic hash plus image artifacts are required.
 ---
 
 # Aavegotchi Renderer Bypass
 
-Render gotchi assets without calling `POST /api/renderer/parse/ids`.
+Render gotchi assets from token data and renderer batch APIs.
 
 ## Inputs
 

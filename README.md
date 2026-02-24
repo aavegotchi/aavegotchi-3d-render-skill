@@ -1,6 +1,6 @@
 # aavegotchi-3d-render-skill
 
-Render Aavegotchi assets without relying on `POST /api/renderer/parse/ids`.
+Render Aavegotchi assets from token data and renderer batch APIs.
 
 This skill derives the renderer hash directly from Goldsky Base core subgraph data, then calls `POST /api/renderer/batch` on `www.aavegotchi.com` and downloads image artifacts.
 
