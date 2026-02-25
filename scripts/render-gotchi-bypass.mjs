@@ -169,7 +169,7 @@ function deriveHash(gotchi) {
   const leftHand = Number(wearables[5] || 0);
   const pet = Number(wearables[6] || 0);
 
-  return [collateral, eyeShape, eyeColor, body, face, eyes, head, leftHand, rightHand, pet].join("-");
+  return [collateral, eyeShape, eyeColor, body, face, eyes, head, rightHand, leftHand, pet].join("-");
 }
 
 async function postJson(url, body) {

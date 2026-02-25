@@ -26,7 +26,7 @@ Render gotchi assets from token data and renderer batch APIs.
 2. Query Goldsky Base core subgraph:
 `https://api.goldsky.com/api/public/project_cmh3flagm0001r4p25foufjtt/subgraphs/aavegotchi-core-base/prod/gn`
 3. Derive hash in renderer format:
-`<Collateral>-<EyeShape>-<EyeColor>-<Body>-<Face>-<Eyes>-<Head>-<LeftHand>-<RightHand>-<Pet>`
+`<Collateral>-<EyeShape>-<EyeColor>-<Body>-<Face>-<Eyes>-<Head>-<RightHand>-<LeftHand>-<Pet>`
 4. Call `POST https://www.aavegotchi.com/api/renderer/batch` with:
 - `verify: true`
 - `renderTypes: ["PNG_Full", "PNG_Headshot", "GLB_3DModel"]`
@@ -63,6 +63,6 @@ Always return:
 ## Troubleshooting
 
 - If Goldsky returns no gotchi, verify `tokenId` and Base context.
-- If batch returns hash-format `400`, verify eye mappings and left/right wearable order.
+- If batch returns hash-format `400`, verify eye mappings and right/left wearable order (`index4` then `index5`).
 - If `availability.exists` is `false`, rerun batch to trigger render and poll again.
 - If endpoint returns `404`, verify production deployment state.
