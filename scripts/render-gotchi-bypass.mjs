@@ -6,6 +6,9 @@ import path from "node:path";
 const GOLDSKY_ENDPOINT =
   "https://api.goldsky.com/api/public/project_cmh3flagm0001r4p25foufjtt/subgraphs/aavegotchi-core-base/prod/gn";
 const DAPP_BASE = "https://www.aavegotchi.com";
+const RENDER_TYPES = ["PNG_Full", "PNG_Headshot", "GLB_3DModel"];
+const DEFAULT_POLL_ATTEMPTS = 18;
+const DEFAULT_POLL_INTERVAL_MS = 10_000;
 
 const COLLATERAL_MAP = {
   Eth: ["0x20d3922b4a1a8560e1ac99fba4fade0c849e2142"],
@@ -38,7 +41,9 @@ function parseArgs(argv) {
   const args = {
     tokenId: null,
     inventoryUrl: null,
-    outDir: "/tmp"
+    outDir: "/tmp",
+    pollAttempts: DEFAULT_POLL_ATTEMPTS,
+    pollIntervalMs: DEFAULT_POLL_INTERVAL_MS
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -60,6 +65,16 @@ function parseArgs(argv) {
       i += 1;
       continue;
     }
+    if (arg === "--poll-attempts" && next) {
+      args.pollAttempts = Number(next);
+      i += 1;
+      continue;
+    }
+    if (arg === "--poll-interval-ms" && next) {
+      args.pollIntervalMs = Number(next);
+      i += 1;
+      continue;
+    }
     if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -71,13 +86,15 @@ function parseArgs(argv) {
 
 function printHelp() {
   console.log(`Usage:
-  node scripts/render-gotchi-bypass.mjs --token-id <id> [--out-dir /tmp]
-  node scripts/render-gotchi-bypass.mjs --inventory-url "<url>" [--out-dir /tmp]
+  node scripts/render-gotchi-bypass.mjs --token-id <id> [--out-dir /tmp] [--poll-attempts 18] [--poll-interval-ms 10000]
+  node scripts/render-gotchi-bypass.mjs --inventory-url "<url>" [--out-dir /tmp] [--poll-attempts 18] [--poll-interval-ms 10000]
 
 Options:
   --token-id       Numeric gotchi token id
   --inventory-url  Inventory URL containing id=<tokenId>
   --out-dir        Output folder for JSON and PNG files (default: /tmp)
+  --poll-attempts  Number of verify polls after force kickoff (default: 18)
+  --poll-interval-ms Milliseconds between verify polls (default: 10000)
 `);
 }
 
@@ -188,6 +205,34 @@ async function postJson(url, body) {
   return { response, json, text };
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getFirstBatchResult(batchJson) {
+  return batchJson?.data?.results?.[0] || {};
+}
+
+function getAvailability(batchResult) {
+  return batchResult?.availability || {};
+}
+
+function isRenderReady(renderTypes, availability) {
+  return renderTypes.every((renderType) => availability?.[renderType]?.exists === true);
+}
+
+function getMissingAvailabilityReason(renderType, availability, hasProxyUrl) {
+  if (!hasProxyUrl) {
+    return `Missing proxy URL for ${renderType}`;
+  }
+  const status = availability?.[renderType]?.status;
+  const exists = availability?.[renderType]?.exists;
+  if (exists === false) {
+    return `Availability for ${renderType} is false (status=${status ?? "unknown"})`;
+  }
+  return `Availability for ${renderType} is unknown`;
+}
+
 async function downloadFile(url, filePath) {
   const response = await fetch(url);
   if (!response.ok) {
@@ -201,6 +246,14 @@ async function downloadFile(url, filePath) {
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   let tokenId = options.tokenId;
+  const pollAttempts =
+    Number.isInteger(options.pollAttempts) && Number(options.pollAttempts) > 0
+      ? Number(options.pollAttempts)
+      : DEFAULT_POLL_ATTEMPTS;
+  const pollIntervalMs =
+    Number.isInteger(options.pollIntervalMs) && Number(options.pollIntervalMs) > 0
+      ? Number(options.pollIntervalMs)
+      : DEFAULT_POLL_INTERVAL_MS;
 
   if (!Number.isInteger(tokenId) && options.inventoryUrl) {
     tokenId = tokenIdFromInventoryUrl(options.inventoryUrl);
@@ -230,51 +283,104 @@ async function main() {
   }
 
   const hash = deriveHash(gotchi);
-
-  const batchPayload = {
+  const kickoffPayload = {
     hashes: [hash],
-    renderTypes: ["PNG_Full", "PNG_Headshot", "GLB_3DModel"],
-    verify: true
+    renderTypes: RENDER_TYPES,
+    force: true,
+    verify: false
   };
-  const batchResult = await postJson(`${DAPP_BASE}/api/renderer/batch`, batchPayload);
-  if (!batchResult.response.ok) {
+  const kickoffResult = await postJson(`${DAPP_BASE}/api/renderer/batch`, kickoffPayload);
+  if (!kickoffResult.response.ok) {
     throw new Error(
-      `Renderer batch failed (${batchResult.response.status}): ${batchResult.text.slice(0, 500)}`
+      `Renderer kickoff failed (${kickoffResult.response.status}): ${kickoffResult.text.slice(0, 500)}`
     );
   }
 
-  const batchJsonPath = path.join(options.outDir, `gotchi-${tokenId}-render-batch.json`);
-  fs.writeFileSync(batchJsonPath, JSON.stringify(batchResult.json, null, 2));
+  const kickoffJsonPath = path.join(options.outDir, `gotchi-${tokenId}-render-batch-kickoff.json`);
+  fs.writeFileSync(kickoffJsonPath, JSON.stringify(kickoffResult.json, null, 2));
 
-  const firstResult = batchResult.json?.data?.results?.[0] || {};
-  const proxyUrls = firstResult.proxyUrls || {};
+  let verifyResult = null;
+  let finalBatchResult = {};
+  let finalAvailability = {};
+
+  for (let attempt = 1; attempt <= pollAttempts; attempt += 1) {
+    const verifyPayload = {
+      hashes: [hash],
+      renderTypes: RENDER_TYPES,
+      verify: true
+    };
+    verifyResult = await postJson(`${DAPP_BASE}/api/renderer/batch`, verifyPayload);
+    if (!verifyResult.response.ok) {
+      throw new Error(
+        `Renderer verify failed (${verifyResult.response.status}): ${verifyResult.text.slice(0, 500)}`
+      );
+    }
+
+    finalBatchResult = getFirstBatchResult(verifyResult.json);
+    finalAvailability = getAvailability(finalBatchResult);
+
+    if (isRenderReady(RENDER_TYPES, finalAvailability)) {
+      break;
+    }
+
+    if (attempt < pollAttempts) {
+      await sleep(pollIntervalMs);
+    }
+  }
+
+  if (!verifyResult) {
+    throw new Error("Renderer verify loop did not produce a response.");
+  }
+
+  const batchJsonPath = path.join(options.outDir, `gotchi-${tokenId}-render-batch.json`);
+  fs.writeFileSync(batchJsonPath, JSON.stringify(verifyResult.json, null, 2));
+
+  const proxyUrls = finalBatchResult.proxyUrls || {};
   const artifacts = {};
 
-  if (proxyUrls.PNG_Full) {
+  if (proxyUrls.PNG_Full && finalAvailability?.PNG_Full?.exists === true) {
     const fullUrl = proxyUrls.PNG_Full.startsWith("http")
       ? proxyUrls.PNG_Full
       : `${DAPP_BASE}${proxyUrls.PNG_Full}`;
     artifacts.fullPngPath = path.join(options.outDir, `gotchi-${tokenId}-full.png`);
     await downloadFile(fullUrl, artifacts.fullPngPath);
     artifacts.fullPngUrl = fullUrl;
+  } else {
+    artifacts.fullPngMissingReason = getMissingAvailabilityReason(
+      "PNG_Full",
+      finalAvailability,
+      Boolean(proxyUrls.PNG_Full)
+    );
   }
 
-  if (proxyUrls.PNG_Headshot) {
+  if (proxyUrls.PNG_Headshot && finalAvailability?.PNG_Headshot?.exists === true) {
     const headshotUrl = proxyUrls.PNG_Headshot.startsWith("http")
       ? proxyUrls.PNG_Headshot
       : `${DAPP_BASE}${proxyUrls.PNG_Headshot}`;
     artifacts.headshotPngPath = path.join(options.outDir, `gotchi-${tokenId}-headshot.png`);
     await downloadFile(headshotUrl, artifacts.headshotPngPath);
     artifacts.headshotPngUrl = headshotUrl;
+  } else {
+    artifacts.headshotPngMissingReason = getMissingAvailabilityReason(
+      "PNG_Headshot",
+      finalAvailability,
+      Boolean(proxyUrls.PNG_Headshot)
+    );
   }
 
   const summary = {
     tokenId,
     hash,
     goldskyStatus: graphResult.response.status,
-    batchStatus: batchResult.response.status,
+    kickoffStatus: kickoffResult.response.status,
+    verifyStatus: verifyResult.response.status,
+    pollAttempts,
+    pollIntervalMs,
+    renderReady: isRenderReady(RENDER_TYPES, finalAvailability),
+    kickoffResponseFile: kickoffJsonPath,
     responseFile: batchJsonPath,
-    glb: firstResult?.availability?.GLB_3DModel || null,
+    availability: finalAvailability,
+    glb: finalAvailability?.GLB_3DModel || null,
     artifacts
   };
 
