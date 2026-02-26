@@ -2,7 +2,7 @@
 
 Render Aavegotchi assets from token data and renderer batch APIs.
 
-This skill derives the renderer hash directly from Goldsky Base core subgraph data, then calls `POST /api/renderer/batch` on `www.aavegotchi.com` and downloads image artifacts.
+This skill derives the renderer hash directly from Goldsky Base core subgraph data, then calls `POST /api/renderer/batch` on `www.aavegotchi.com` with `force:true`, polls `verify:true` until assets are available, and downloads image artifacts.
 
 Skill name: `aavegotchi-3d-renderer`.
 
@@ -26,11 +26,13 @@ node scripts/render-gotchi-bypass.mjs \
 
 Artifacts are written to `/tmp` by default:
 
+- `/tmp/gotchi-<id>-render-batch-kickoff.json`
 - `/tmp/gotchi-<id>-render-batch.json`
 - `/tmp/gotchi-<id>-full.png`
 - `/tmp/gotchi-<id>-headshot.png`
 
 Use `--out-dir <path>` to override output location.
+Use `--poll-attempts <n>` and `--poll-interval-ms <ms>` to tune polling behavior.
 
 ## Notes
 
