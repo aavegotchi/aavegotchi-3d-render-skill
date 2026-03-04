@@ -2,6 +2,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const GOLDSKY_ENDPOINT =
   "https://api.goldsky.com/api/public/project_cmh3flagm0001r4p25foufjtt/subgraphs/aavegotchi-core-base/prod/gn";
@@ -243,8 +244,14 @@ async function downloadFile(url, filePath) {
   return filePath;
 }
 
-async function main() {
-  const options = parseArgs(process.argv.slice(2));
+export async function renderGotchi(optionsInput = {}) {
+  const options = {
+    tokenId: optionsInput.tokenId ?? null,
+    inventoryUrl: optionsInput.inventoryUrl ?? null,
+    outDir: optionsInput.outDir ?? "/tmp",
+    pollAttempts: optionsInput.pollAttempts ?? DEFAULT_POLL_ATTEMPTS,
+    pollIntervalMs: optionsInput.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS
+  };
   let tokenId = options.tokenId;
   const pollAttempts =
     Number.isInteger(options.pollAttempts) && Number(options.pollAttempts) > 0
@@ -384,10 +391,18 @@ async function main() {
     artifacts
   };
 
+  return summary;
+}
+
+async function main() {
+  const options = parseArgs(process.argv.slice(2));
+  const summary = await renderGotchi(options);
   console.log(JSON.stringify(summary, null, 2));
 }
 
-main().catch((error) => {
-  console.error(error.message || error);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error.message || error);
+    process.exit(1);
+  });
+}
