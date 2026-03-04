@@ -1,0 +1,9 @@
+{
+  "name": "aavegotchi-3d-render-skill",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "puppeteer-core": "^24.6.0"
+  }
+}

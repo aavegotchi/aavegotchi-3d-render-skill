@@ -1,6 +1,6 @@
 ---
 name: aavegotchi-3d-renderer
-description: Render Aavegotchi assets by deriving renderer hashes from Goldsky Base core data and calling POST /api/renderer/batch on www.aavegotchi.com. Use when the user gives a tokenId or inventory URL, or when deterministic hash plus image artifacts are required.
+description: Render Aavegotchi assets by deriving renderer hashes from Goldsky Base core data and calling POST /api/renderer/batch on www.aavegotchi.com. Also supports `front|left|right|back` profile renders from GLB output.
 ---
 
 # Aavegotchi 3D Renderer
@@ -19,6 +19,7 @@ Render gotchi assets from token data and renderer batch APIs.
 - Save raw batch JSON to disk.
 - Save `PNG_Full` and `PNG_Headshot` to disk when available.
 - Return `GLB_3DModel` availability and URL when present.
+- Optionally save `viewImagePath` for `front|left|right|back`.
 
 ## Execute
 
@@ -58,6 +59,21 @@ Optional polling controls:
 --poll-attempts 18 --poll-interval-ms 10000
 ```
 
+For profile views from GLB:
+
+```bash
+npm install
+node scripts/render-gotchi-view.mjs --token-id 6741 --view left
+```
+
+Inventory URL is also supported:
+
+```bash
+node scripts/render-gotchi-view.mjs \
+  --inventory-url "https://www.aavegotchi.com/u/0x.../inventory?itemType=aavegotchis&chainId=8453&id=6741" \
+  --view back
+```
+
 ## Return format
 
 Always return:
@@ -68,6 +84,7 @@ Always return:
 4. Poll summary (`pollAttempts`, `pollIntervalMs`, `renderReady`)
 5. `PNG_Full` and `PNG_Headshot` output paths (or missing reason)
 6. `GLB_3DModel` availability and URL when present
+7. `view` and `viewImagePath` when using `render-gotchi-view.mjs`
 
 ## Troubleshooting
 
@@ -75,3 +92,4 @@ Always return:
 - If batch returns hash-format `400`, verify eye mappings and right/left wearable order (`index4` then `index5`).
 - If `availability.exists` is `false`, ensure kickoff used `force:true`, then keep polling `verify:true` until timeout.
 - If endpoint returns `404`, verify production deployment state.
+- If angle render fails, ensure `puppeteer-core` is installed (`npm install`) and Chrome is available (or pass `--browser-path`).
