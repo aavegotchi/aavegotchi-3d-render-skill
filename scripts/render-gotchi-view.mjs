@@ -8,11 +8,11 @@ const DAPP_BASE = "https://www.aavegotchi.com";
 const DEFAULT_VIEW = "front";
 const DEFAULT_WINDOW_SIZE = 1024;
 const DEFAULT_TIMEOUT_MS = 120_000;
-const ORBIT_BY_VIEW = {
-  front: "0deg 75deg 120%",
-  left: "-90deg 75deg 120%",
-  right: "90deg 75deg 120%",
-  back: "180deg 75deg 120%"
+const CAMERA_DIRECTION_BY_VIEW = {
+  front: [0, 0, 1],
+  left: [-1, 0, 0],
+  right: [1, 0, 0],
+  back: [0, 0, -1]
 };
 
 function parseArgs(argv) {
@@ -97,15 +97,6 @@ Options:
 `);
 }
 
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
 function getGlbProxyUrl(summary) {
   if (!summary.responseFile || !fs.existsSync(summary.responseFile)) {
     throw new Error("Bypass response file missing; cannot resolve GLB proxy URL.");
@@ -140,7 +131,7 @@ function resolveBrowserPath(explicitPath) {
 }
 
 function buildHtml(glbUrl, view) {
-  const orbit = ORBIT_BY_VIEW[view] || ORBIT_BY_VIEW.front;
+  const direction = CAMERA_DIRECTION_BY_VIEW[view] || CAMERA_DIRECTION_BY_VIEW.front;
   return `<!doctype html>
 <html>
   <head>
@@ -148,29 +139,135 @@ function buildHtml(glbUrl, view) {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
       html, body { margin: 0; width: 100%; height: 100%; background: #ffffff; overflow: hidden; }
-      model-viewer { width: 100vw; height: 100vh; --poster-color: transparent; }
+      canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; }
+      #out { display: none; }
     </style>
-    <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+        }
+      }
+    </script>
   </head>
   <body>
-    <model-viewer
-      id="mv"
-      src="${escapeHtml(glbUrl)}"
-      camera-controls
-      camera-orbit="${escapeHtml(orbit)}"
-      field-of-view="30deg"
-      exposure="1.05"
-      shadow-intensity="0"
-      interaction-prompt="none">
-    </model-viewer>
-    <script>
-      const mv = document.getElementById("mv");
-      mv.addEventListener("load", () => {
+    <canvas id="gl"></canvas>
+    <canvas id="out"></canvas>
+    <script type="module">
+      import * as THREE from "three";
+      import { GLTFLoader } from "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js";
+
+      const glCanvas = document.getElementById("gl");
+      const outCanvas = document.getElementById("out");
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xffffff);
+
+      const renderer = new THREE.WebGLRenderer({
+        canvas: glCanvas,
+        antialias: true,
+        alpha: false,
+        preserveDrawingBuffer: true
+      });
+      renderer.setSize(window.innerWidth, window.innerHeight, false);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+      const camera = new THREE.PerspectiveCamera(
+        32,
+        window.innerWidth / window.innerHeight,
+        0.01,
+        1000
+      );
+      const direction = new THREE.Vector3(${direction[0]}, ${direction[1]}, ${direction[2]}).normalize();
+
+      scene.add(new THREE.AmbientLight(0xffffff, 1.25));
+      const keyLight = new THREE.DirectionalLight(0xffffff, 1.15);
+      keyLight.position.set(2.5, 3, 4);
+      scene.add(keyLight);
+      const fillLight = new THREE.DirectionalLight(0xffffff, 0.65);
+      fillLight.position.set(-3, 1.5, -2);
+      scene.add(fillLight);
+
+      function centerRenderedImage() {
+        const width = glCanvas.width;
+        const height = glCanvas.height;
+        const scanCanvas = document.createElement("canvas");
+        scanCanvas.width = width;
+        scanCanvas.height = height;
+        const scanCtx = scanCanvas.getContext("2d", { willReadFrequently: true });
+        if (!scanCtx) return;
+        scanCtx.drawImage(glCanvas, 0, 0);
+
+        const pixels = scanCtx.getImageData(0, 0, width, height).data;
+        const bgThreshold = 245;
+        let minX = width;
+        let minY = height;
+        let maxX = -1;
+        let maxY = -1;
+
+        for (let y = 0; y < height; y += 1) {
+          for (let x = 0; x < width; x += 1) {
+            const i = (y * width + x) * 4;
+            const r = pixels[i];
+            const g = pixels[i + 1];
+            const b = pixels[i + 2];
+            if (r > bgThreshold && g > bgThreshold && b > bgThreshold) continue;
+            if (x < minX) minX = x;
+            if (y < minY) minY = y;
+            if (x > maxX) maxX = x;
+            if (y > maxY) maxY = y;
+          }
+        }
+
+        outCanvas.width = width;
+        outCanvas.height = height;
+        const outCtx = outCanvas.getContext("2d");
+        if (!outCtx) return;
+        outCtx.fillStyle = "#ffffff";
+        outCtx.fillRect(0, 0, width, height);
+
+        if (maxX < minX || maxY < minY) {
+          outCtx.drawImage(glCanvas, 0, 0);
+        } else {
+          const objectCenterX = (minX + maxX) / 2;
+          const objectCenterY = (minY + maxY) / 2;
+          const targetCenterX = (width - 1) / 2;
+          const targetCenterY = (height - 1) / 2;
+          const dx = Math.round(targetCenterX - objectCenterX);
+          const dy = Math.round(targetCenterY - objectCenterY);
+          outCtx.drawImage(glCanvas, dx, dy);
+        }
+
+        glCanvas.style.display = "none";
+        outCanvas.style.display = "block";
+      }
+
+      const loader = new GLTFLoader();
+      loader.load(${JSON.stringify(glbUrl)}, (gltf) => {
+        const model = gltf.scene;
+        scene.add(model);
+
+        // Center the model by bounds before computing camera distance.
+        const bounds = new THREE.Box3().setFromObject(model);
+        const center = bounds.getCenter(new THREE.Vector3());
+        const size = bounds.getSize(new THREE.Vector3());
+        model.position.sub(center);
+
+        const radius = Math.max(size.length() * 0.5, 0.01);
+        const fovRad = THREE.MathUtils.degToRad(camera.fov);
+        const fitOffset = 1.25;
+        const distance = (radius / Math.sin(fovRad / 2)) * fitOffset;
+
+        camera.position.copy(direction.multiplyScalar(distance));
+        camera.lookAt(0, 0, 0);
+        camera.updateProjectionMatrix();
+
+        renderer.render(scene, camera);
+        centerRenderedImage();
         document.body.dataset.ready = "1";
       });
-      mv.addEventListener("error", () => {
+      loader.manager.onError = () => {
         document.body.dataset.error = "1";
-      });
+      };
     </script>
   </body>
 </html>`;
@@ -230,7 +327,7 @@ async function main() {
     printHelp();
     throw new Error("Provide --token-id <id> or --inventory-url with id=<tokenId>.");
   }
-  if (!Object.hasOwn(ORBIT_BY_VIEW, options.view)) {
+  if (!Object.hasOwn(CAMERA_DIRECTION_BY_VIEW, options.view)) {
     throw new Error(`Unsupported --view '${options.view}'. Use front|left|right|back.`);
   }
   if (!Number.isInteger(options.windowSize) || options.windowSize < 256) {
